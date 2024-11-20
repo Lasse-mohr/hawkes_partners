@@ -1,13 +1,18 @@
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit  # Logistic sigmoid function
-from patsy import dmatrix
+from numpy.random import default_rng
+
 
 class SelfExcitingLogisticRegression:
-    def __init__(self, max_iter=100, tol=1e-6, random_state=None):
+    """ 
+    
+    """
+    def __init__(self, max_iter=100, tol=1e-6, rng=default_rng(1), time_types=['continuous', 'discrete']):
+        self.time_types = time_types
+        self.rng = rng
         self.max_iter = max_iter
         self.tol = tol
-        self.random_state = random_state
         self.params_ = None
         self.success_ = False
         self.nll_ = None  # Negative log-likelihood after fit
@@ -80,7 +85,12 @@ class SelfExcitingLogisticRegression:
         )
 
         # Compute linear predictor
-        linear_pred = alpha + beta_s * s + beta_c * c + np.dot(self.covariates_all, gamma)
+        linear_pred = alpha +  np.dot(self.covariates_all, gamma)
+        if 'continious' in self.time_types:
+            linear_pred += beta_s * s 
+        if 'discrete' in self.time_types:
+            linear_pred = beta_c * c
+
         probs = expit(linear_pred)
 
         # Negative log-likelihood
@@ -94,14 +104,13 @@ class SelfExcitingLogisticRegression:
         """
         Fits the logistic regression model.
         """
-        np.random.seed(self.random_state)
         self.events_all = events_all
         self.times_all = times_all  # 2xN array: continuous and discrete time
         self.covariates_all = covariates_all
         self.individuals_all = individuals_all
 
         n_covariates = covariates_all.shape[1]
-        initial_params = np.random.rand(3 + n_covariates + 2)  # alpha, beta_s, beta_c, gamma..., delta_s, delta_c
+        initial_params = self.rng.uniform(0, 1 ,size=3 + n_covariates + 2)  # alpha, beta_s, beta_c, gamma..., delta_s, delta_c
 
         # Optimize
         result = minimize(
@@ -112,7 +121,17 @@ class SelfExcitingLogisticRegression:
             bounds=[(None, None)] * (3 + n_covariates) + [(1e-4, None), (1e-4, None)]
         )
 
-        self.params_ = result.x
+        params = result.x
+        # If the model does not include continuous or discrete time, remove the corresponding parameters
+        if 'continuous' not in self.time_types and 'discrete' not in self.time_types:
+            params = params[:-2]
+        else:
+            if 'continuous' not in self.time_types:
+                params = params[:-1]
+            elif 'discrete' not in self.time_types:
+                params = params[:-2] + params[-1]
+
+        self.params_ = params
         self.success_ = result.success
         self.nll_ = result.fun  # Store the negative log-likelihood
         self.n_params_ = len(self.params_)  # Number of model parameters

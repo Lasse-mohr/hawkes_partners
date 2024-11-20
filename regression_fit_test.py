@@ -80,10 +80,38 @@ individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)[: l
 # Combine continuous and discrete times into a 2xN array
 times = np.vstack([continuous_time, discrete_time])
 
-# Fit the base model
-base_model = SelfExcitingLogisticRegression(max_iter=200)
+# Fit unexciting logistic regression model 
+base_model = SelfExcitingLogisticRegression(max_iter=200, time_types=[])
 base_model.fit(events, times, covariates, individuals)
 
 print("Base Model Results:")
 print("AIC:", base_model.aic())
 print("BIC:", base_model.bic(len(events)))
+print(base_model.params_)
+
+# Fit the continous time model
+continous_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['continuous'])
+continous_model.fit(events, times, covariates, individuals)
+
+print("continous Model Results:")
+print("AIC:", continous_model.aic())
+print("BIC:", continous_model.bic(len(events)))
+print(continous_model.params_)
+
+# Fit the discrete time model
+discrete_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['discrete'])
+discrete_model.fit(events, times, covariates, individuals)
+
+print("discrete Model Results:")
+print("AIC:", discrete_model.aic())
+print("BIC:", discrete_model.bic(len(events)))
+print(discrete_model.params_)
+
+# Fit the two-dim time model
+complex_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['discrete', 'continuous'])
+complex_model.fit(events, times, covariates, individuals)
+
+print("complex Model Results:")
+print("AIC:", complex_model.aic())
+print("BIC:", complex_model.bic(len(events)))
+print(complex_model.params_)
