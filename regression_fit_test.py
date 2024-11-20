@@ -2,55 +2,88 @@ import numpy as np
 from scipy.special import expit
 from src.self_exciting.hawkes_regression import (
     SelfExcitingLogisticRegression,
-    SelfExcitingLogisticRegressionWithSplines
 )
 
 # Set random seed for reproducibility
 rng = np.random.default_rng(seed=42)
 
+# Parameters for synthetic data generation
+n_individuals = 100  # Number of individuals
+max_events_per_individual = 50  # Maximum number of events per individual
+total_events = n_individuals * max_events_per_individual  # Approximate total events
+
 # Generate synthetic data
-n_samples = 1_000_000
-times = np.sort(rng.uniform(0, 10, n_samples))  # Random event times
-age = rng.uniform(20, 50, n_samples).reshape(-1, 1)  # Random ages
-sex = rng.choice([0, 1], size=n_samples).reshape(-1, 1)  # Binary sex covariate
-cum_partner_count = rng.choice(np.arange(1, 10), size=n_samples).reshape(-1, 1)  # Cumulative partner count
+individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)
+n_events_per_individual = rng.integers(5, max_events_per_individual, size=n_individuals)
 
-# Combine covariates into a single matrix
-covariates = np.hstack([age, sex, cum_partner_count])
+continuous_time = []
+discrete_time = []
+events = []
+covariates = []
 
-# Generate synthetic partner change events
-true_alpha, true_beta, true_gamma, true_delta = 0.5, 1.2, [0.8, -0.5, 0.3], 0.2
-true_s = np.zeros(n_samples)
+# Generate synthetic data for each individual
+for i, n_events in enumerate(n_events_per_individual):
+    # Generate continuous and discrete times for this individual
+    continuous_times = np.sort(rng.uniform(0, 10, n_events))
+    discrete_times = np.arange(1, n_events + 1)
 
-for i in range(1, n_samples):
-    time_diff = times[i] - times[:i]
-    true_s[i] = np.sum(np.exp(-true_delta * time_diff) * rng.choice([0, 1], size=i))
+    # Generate covariates for this individual
+    age = rng.uniform(20, 50, n_events).reshape(-1, 1)
+    sex = rng.choice([0, 1], size=n_events).reshape(-1, 1)
+    cum_partner_count = rng.choice(np.arange(1, 10), size=n_events).reshape(-1, 1)
+    covariates_individual = np.hstack([age, sex, cum_partner_count])
 
-# Define the linear predictor
-linear_pred = (
-    true_alpha
-    + true_beta * true_s
-    + np.dot(covariates, true_gamma)
-    + 0.02 * age.ravel() - 0.0005 * (age.ravel() - 35) ** 2  # Non-monotonic effect of age
-)
+    # Generate synthetic partner change events
+    true_alpha, true_beta, true_gamma, true_delta_s, true_delta_c = (
+        0.5,
+        1.2,
+        [0.8, -0.5, 0.3],
+        0.1,
+        0.2,
+    )
+    s = np.zeros(n_events)
+    c = np.zeros(n_events)
 
-# Compute probabilities and generate binary events
-probs = expit(linear_pred)
-events = rng.binomial(1, probs)
+    for j in range(1, n_events):
+        discrete_diff = discrete_times[j] - discrete_times[:j]
+        continuous_diff = continuous_times[j] - continuous_times[:j]
+        s[j] = np.sum(np.exp(-true_delta_s * discrete_diff) * rng.choice([0, 1], size=j))
+        c[j] = np.sum(np.exp(-true_delta_c * continuous_diff) * rng.choice([0, 1], size=j))
 
+    # Define the linear predictor for this individual
+    linear_pred = (
+        true_alpha
+        + true_beta * s
+        + true_beta * c
+        + np.dot(covariates_individual, true_gamma)
+        + 0.02 * age.ravel()
+        - 0.0005 * (age.ravel() - 35) ** 2  # Non-monotonic effect of age
+    )
 
-# Fit and evaluate the base model
+    # Compute probabilities and generate binary events
+    probs = expit(linear_pred)
+    events_individual = rng.binomial(1, probs)
+
+    # Store this individual's data
+    continuous_time.append(continuous_times)
+    discrete_time.append(discrete_times)
+    events.append(events_individual)
+    covariates.append(covariates_individual)
+
+# Combine all individuals' data
+continuous_time = np.concatenate(continuous_time)
+discrete_time = np.concatenate(discrete_time)
+events = np.concatenate(events)
+covariates = np.vstack(covariates)
+individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)[: len(continuous_time)]
+
+# Combine continuous and discrete times into a 2xN array
+times = np.vstack([continuous_time, discrete_time])
+
+# Fit the base model
 base_model = SelfExcitingLogisticRegression(max_iter=200)
-base_model.fit(events, times, covariates)
+base_model.fit(events, times, covariates, individuals)
 
 print("Base Model Results:")
 print("AIC:", base_model.aic())
-print("BIC:", base_model.bic(n_samples))
-
-# Fit and evaluate the spline-enhanced model
-spline_model = SelfExcitingLogisticRegressionWithSplines(max_iter=200)
-spline_model.fit(events, times, covariates, age.ravel())
-
-print("\nSpline Model Results:")
-print("AIC:", spline_model.aic())
-print("BIC:", spline_model.bic(n_samples))
+print("BIC:", base_model.bic(len(events)))
