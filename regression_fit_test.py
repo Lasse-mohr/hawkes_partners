@@ -2,7 +2,10 @@ import numpy as np
 from scipy.special import expit
 from src.self_exciting.hawkes_regression import (
     SelfExcitingLogisticRegression,
+    likelihood_ratio_test,
 )
+
+max_iter = 1000
 
 # Set random seed for reproducibility
 rng = np.random.default_rng(seed=42)
@@ -59,6 +62,9 @@ for i, n_events in enumerate(n_events_per_individual):
         + 0.02 * age.ravel()
         - 0.0005 * (age.ravel() - 35) ** 2  # Non-monotonic effect of age
     )
+    # normalize linear predictions
+    linear_pred -= linear_pred.mean()
+    linear_pred /= linear_pred.max()
 
     # Compute probabilities and generate binary events
     probs = expit(linear_pred)
@@ -81,37 +87,42 @@ individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)[: l
 times = np.vstack([continuous_time, discrete_time])
 
 # Fit unexciting logistic regression model 
-base_model = SelfExcitingLogisticRegression(max_iter=200, time_types=[])
+base_model = SelfExcitingLogisticRegression(
+    max_iter=max_iter,
+    time_types=[],
+    )
 base_model.fit(events, times, covariates, individuals)
 
-print("Base Model Results:")
-print("AIC:", base_model.aic())
-print("BIC:", base_model.bic(len(events)))
-print(base_model.params_)
-
 # Fit the continous time model
-continous_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['continuous'])
+continous_model = SelfExcitingLogisticRegression(
+    max_iter=max_iter,
+    time_types=['continuous'],
+    )
 continous_model.fit(events, times, covariates, individuals)
 
-print("continous Model Results:")
-print("AIC:", continous_model.aic())
-print("BIC:", continous_model.bic(len(events)))
-print(continous_model.params_)
-
 # Fit the discrete time model
-discrete_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['discrete'])
+discrete_model = SelfExcitingLogisticRegression(
+    max_iter=max_iter,
+    time_types=['discrete'],
+    )
 discrete_model.fit(events, times, covariates, individuals)
 
-print("discrete Model Results:")
-print("AIC:", discrete_model.aic())
-print("BIC:", discrete_model.bic(len(events)))
-print(discrete_model.params_)
-
 # Fit the two-dim time model
-complex_model = SelfExcitingLogisticRegression(max_iter=200, time_types=['discrete', 'continuous'])
+complex_model = SelfExcitingLogisticRegression(
+    max_iter=max_iter,
+    time_types=['discrete', 'continuous'],
+    )
 complex_model.fit(events, times, covariates, individuals)
 
-print("complex Model Results:")
-print("AIC:", complex_model.aic())
-print("BIC:", complex_model.bic(len(events)))
-print(complex_model.params_)
+# Perform likelihood ratio tests
+print("Base vs. Continuous time model:")
+print(likelihood_ratio_test(base_model, continous_model))
+
+print("Base vs. Discrete time model:")
+print(likelihood_ratio_test(base_model, discrete_model))
+
+print("Continous Time vs. Continious and Discrete time model:")
+print(likelihood_ratio_test(continous_model, complex_model))
+
+print("Discrete Time vs. Continious and Discrete time model:")
+print(likelihood_ratio_test(discrete_model, complex_model))

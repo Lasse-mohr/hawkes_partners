@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit  # Logistic sigmoid function
 from numpy.random import default_rng
+from scipy.stats import chi2
 
 
 class SelfExcitingLogisticRegression:
@@ -64,16 +65,59 @@ class SelfExcitingLogisticRegression:
 
         return s, c
 
+    def set_params(self, params):
+        """
+        Set the model parameters.
+        """
+        if ('continuous' not in self.time_types) and ('discrete' not in self.time_types):
+            params = params[:-4]
+        else:
+            if 'discrete' not in self.time_types and 'continuous' in self.time_types:
+                params = params[:-2]
+
+            elif 'continuous' not in self.time_types and 'discrete' in self.time_types:
+                params = list(params[:-4]) + list(params[-2:])
+
+        self.params_ = params
+        self.n_params_ = len(self.params_)  # Number of model parameters
+
+    def load_params(self):
+        """ 
+        Helper function to Load the parameters from the optimization result avoiding indexing errors.
+        """
+        if self.params_ is None:
+            raise ValueError("The model is not fitted yet.")
+
+        alpha = self.params_[0]
+        gamma = self.params_[1:-4]
+
+        if ('continuous' in self.time_types):
+            beta_c = self.params_[-4]
+            delta_c = self.params_[-3]
+        else:
+            beta_c = 0
+            delta_c = 0
+
+        if ('discrete' in self.time_types):
+            beta_s = self.params_[-2]
+            delta_s = self.params_[-1]
+        else:
+            beta_s = 0
+            delta_s = 0
+    
+        return alpha, gamma, beta_s, beta_c, delta_s, delta_c
+
+
     def log_likelihood(self, params):
         """
         Negative log-likelihood for the logistic regression with self-exciting kernels.
         """
         alpha = params[0]
-        beta_s = params[1]
-        beta_c = params[2]
-        gamma = params[3:-2]
-        delta_s = params[-2]
-        delta_c = params[-1]
+        gamma = params[1:-4]
+        beta_c = params[-4]
+        delta_c = params[-3]
+        beta_s = params[-2]
+        delta_s = params[-1]
 
         # Compute kernels
         s, c = self.compute_kernels(
@@ -98,6 +142,7 @@ class SelfExcitingLogisticRegression:
             self.events_all * np.log(probs + 1e-8) +
             (1 - self.events_all) * np.log(1 - probs + 1e-8)
         )
+        
         return nll
 
     def fit(self, events_all, times_all, covariates_all, individuals_all):
@@ -123,18 +168,10 @@ class SelfExcitingLogisticRegression:
 
         params = result.x
         # If the model does not include continuous or discrete time, remove the corresponding parameters
-        if 'continuous' not in self.time_types and 'discrete' not in self.time_types:
-            params = params[:-2]
-        else:
-            if 'continuous' not in self.time_types:
-                params = params[:-1]
-            elif 'discrete' not in self.time_types:
-                params = params[:-2] + params[-1]
 
-        self.params_ = params
+        self.set_params(params)
         self.success_ = result.success
         self.nll_ = result.fun  # Store the negative log-likelihood
-        self.n_params_ = len(self.params_)  # Number of model parameters
 
         if not self.success_:
             raise ValueError("Optimization did not converge.")
@@ -147,12 +184,7 @@ class SelfExcitingLogisticRegression:
         if self.params_ is None:
             raise ValueError("The model is not fitted yet.")
 
-        alpha = self.params_[0]
-        beta_s = self.params_[1]
-        beta_c = self.params_[2]
-        gamma = self.params_[3:-2]
-        delta_s = self.params_[-2]
-        delta_c = self.params_[-1]
+        alpha, gamma, beta_s, beta_c, delta_s, delta_c = self.load_params()
 
         # Assuming events are zeros during prediction
         events_all = np.zeros(times_all.shape[1])
@@ -194,3 +226,30 @@ class SelfExcitingLogisticRegression:
         if self.nll_ is None or self.n_params_ is None:
             raise ValueError("Model must be fitted before computing BIC.")
         return np.log(n_samples) * self.n_params_ + 2 * self.nll_
+
+
+def likelihood_ratio_test(
+        submodel: SelfExcitingLogisticRegression,
+        fullmodel: SelfExcitingLogisticRegression,
+        alpha=0.05
+        ):
+    """
+    Perform a likelihood ratio test to compare two nested models.
+    """
+    if submodel.n_params_ is None or fullmodel.n_params_ is None or submodel.n_params_ >= fullmodel.n_params_:
+        raise ValueError("The submodel must have fewer parameters than the full model.")
+
+    if submodel.nll_ is None or fullmodel.nll_ is None:
+        raise ValueError("Both models must be fitted before performing the test.")
+
+    # Compute log-likelihoods
+    ll_submodel = - submodel.nll_
+    ll_fullmodel = - fullmodel.nll_
+
+    # Compute test statistic
+    test_stat = 2 * (ll_fullmodel - ll_submodel)
+
+    # Compute p-value
+    p_value = 1 - chi2.cdf(test_stat, fullmodel.n_params_ - submodel.n_params_)
+
+    return p_value < alpha, p_value, test_stat
