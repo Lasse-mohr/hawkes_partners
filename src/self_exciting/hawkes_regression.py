@@ -19,7 +19,7 @@ class SelfExcitingLogisticRegression:
         self.nll_ = None  # Negative log-likelihood after fit
         self.n_params_ = None  # Number of parameters in the model
 
-    def compute_kernels(self, events_all, times_all, delta_s, delta_c, individuals_all):
+    def compute_kernels(self, events_all, times_all, delta_s, delta_c, individuals_all, individual_shift_idx):
         """
         Computes the discrete and continuous kernels s_ij and c_ij for all individuals.
         
