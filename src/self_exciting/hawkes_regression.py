@@ -19,7 +19,7 @@ class SelfExcitingLogisticRegression:
         self.nll_ = None  # Negative log-likelihood after fit
         self.n_params_ = None  # Number of parameters in the model
 
-    def compute_kernels(self, events_all, times_all, delta_s, delta_c, individuals_all, individual_shift_idx):
+    def compute_kernels(self, events_all, times_all, delta_s, delta_c, individuals_all):
         """
         Computes the discrete and continuous kernels s_ij and c_ij for all individuals.
         
@@ -42,26 +42,38 @@ class SelfExcitingLogisticRegression:
         continuous_time = times_all[0, :]
         discrete_time = times_all[1, :]
 
-        last_individual = individuals_all[0]
-        for j in range(n_total):
-            if individuals_all[j] != last_individual:
-                # New individual, reset last_individual and skip summation
-                last_individual = individuals_all[j]
-                continue
+        # we need to iterate each individual and their events 
+        start_idx = 0
+        while start_idx < n_total:
+            current_individual = individuals_all[start_idx]
+            # Find the end index for the current individual
+            end_idx = start_idx
+            while end_idx < n_total and individuals_all[end_idx] == current_individual:
+                end_idx += 1
 
-            # Indices of past events for the same individual
-            past_indices = np.where((individuals_all[:j] == individuals_all[j]))[0]
+            # Extract data for the current individual
+            indices = np.arange(start_idx, end_idx)
+            individual_events = events_all[start_idx:end_idx]
+            individual_continuous_time = continuous_time[start_idx:end_idx]
+            individual_discrete_time = discrete_time[start_idx:end_idx]
 
-            if len(past_indices) == 0:
-                continue
+            # Compute kernels for the current individual
+            for j in range(len(indices)):
+                if j == 0:
+                    continue  # No past events for the first event
 
-            # Continuous kernel: c_ij
-            time_diff = continuous_time[j] - continuous_time[past_indices]
-            c[j] = np.sum(np.exp(-delta_c * time_diff) * events_all[past_indices])
+                past_indices = np.arange(0, j)
 
-            # Discrete kernel: s_ij
-            discrete_diff = discrete_time[j] - discrete_time[past_indices]
-            s[j] = np.sum(np.exp(-delta_s * discrete_diff) * events_all[past_indices])
+                # Continuous kernel: c_ij
+                time_diff = individual_continuous_time[j] - individual_continuous_time[past_indices]
+                c[start_idx + j] = np.sum(np.exp(-delta_c * time_diff) * individual_events[past_indices])
+
+                # Discrete kernel: s_ij
+                discrete_diff = individual_discrete_time[j] - individual_discrete_time[past_indices]
+                s[start_idx + j] = np.sum(np.exp(-delta_s * discrete_diff) * individual_events[past_indices])
+
+            # Move to the next individual
+            start_idx = end_idx
 
         return s, c
 
