@@ -83,6 +83,12 @@ events = np.concatenate(events)
 covariates = np.vstack(covariates)
 individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)[: len(continuous_time)]
 
+print(f'Continuous: {continuous_time.shape}')
+print(f'Discrete: {discrete_time.shape}')
+print(f'Events: {events.shape}')
+print(f'Covariates: {covariates.shape}')
+print(f'Individuals: {individuals.shape}')
+
 # Combine continuous and discrete times into a 2xN array
 times = np.vstack([continuous_time, discrete_time])
 
