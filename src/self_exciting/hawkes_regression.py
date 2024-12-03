@@ -31,7 +31,7 @@ def compute_kernels_for_individual(args):
 
 class SelfExcitingLogisticRegression:
     """ 
-    
+    Logistic regression with self-exciting kernels for continuous and discrete time. 
     """
     def __init__(self, max_iter=100, tol=1e-6, rng=default_rng(1),
                  time_types=['continuous', 'discrete'], n_jobs=1):
@@ -264,7 +264,7 @@ class SelfExcitingLogisticRegression:
 
         bounds = alpha_bound + gamma_bound + beta_s_bound + delta_s_bound + beta_c_bound + delta_c_bound
         # Optimize
-        
+
         result = minimize(
             self.log_likelihood,
             initial_params,
