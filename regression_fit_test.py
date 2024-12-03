@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from scipy.special import expit
 from src.self_exciting.hawkes_regression import (
     SelfExcitingLogisticRegression,
@@ -11,8 +12,8 @@ max_iter = 1000
 rng = np.random.default_rng(seed=42)
 
 # Parameters for synthetic data generation
-n_individuals = 100  # Number of individuals
-max_events_per_individual = 50  # Maximum number of events per individual
+n_individuals = int(10**5)  # Number of individuals
+max_events_per_individual = 10  # Maximum number of events per individual
 total_events = n_individuals * max_events_per_individual  # Approximate total events
 
 # Generate synthetic data
@@ -83,52 +84,61 @@ events = np.concatenate(events)
 covariates = np.vstack(covariates)
 individuals = np.repeat(np.arange(n_individuals), max_events_per_individual)[: len(continuous_time)]
 
-print(f'Continuous: {continuous_time.shape}')
-print(f'Discrete: {discrete_time.shape}')
-print(f'Events: {events.shape}')
-print(f'Covariates: {covariates.shape}')
-print(f'Individuals: {individuals.shape}')
-
 # Combine continuous and discrete times into a 2xN array
 times = np.vstack([continuous_time, discrete_time])
 
-# Fit unexciting logistic regression model 
-base_model = SelfExcitingLogisticRegression(
-    max_iter=max_iter,
-    time_types=[],
-    )
-base_model.fit(events, times, covariates, individuals)
+## Fit unexciting logistic regression model 
+#base_model = SelfExcitingLogisticRegression(
+#    max_iter=max_iter,
+#    time_types=[],
+#    )
+#base_model.fit(events, times, covariates, individuals)
 
 # Fit the continous time model
-continous_model = SelfExcitingLogisticRegression(
-    max_iter=max_iter,
-    time_types=['continuous'],
-    )
-continous_model.fit(events, times, covariates, individuals)
+#continous_model = SelfExcitingLogisticRegression(
+#    max_iter=max_iter,
+#    time_types=['continuous'],
+#    )
+#continous_model.fit(events, times, covariates, individuals)
 
 # Fit the discrete time model
-discrete_model = SelfExcitingLogisticRegression(
-    max_iter=max_iter,
-    time_types=['discrete'],
-    )
-discrete_model.fit(events, times, covariates, individuals)
+#discrete_model = SelfExcitingLogisticRegression(
+#    max_iter=max_iter,
+#    time_types=['discrete'],
+#    )
+#discrete_model.fit(events, times, covariates, individuals)
 
 # Fit the two-dim time model
+
+complex_model_parallel = SelfExcitingLogisticRegression(
+    max_iter=max_iter,
+    time_types=['discrete', 'continuous'],
+    n_jobs=-1
+    )
+then = time.time()
+complex_model_parallel.fit(events, times, covariates, individuals)
+now = time.time()
+print(f"Parallel implementation: Time elapsed: {now - then:.2f}")
+
+
 complex_model = SelfExcitingLogisticRegression(
     max_iter=max_iter,
     time_types=['discrete', 'continuous'],
     )
+then = time.time()
 complex_model.fit(events, times, covariates, individuals)
+now = time.time()
+print(f"Serial implementation: Time elapsed: {now - then:.2f}")
 
-# Perform likelihood ratio tests
-print("Base vs. Continuous time model:")
-print(likelihood_ratio_test(base_model, continous_model))
-
-print("Base vs. Discrete time model:")
-print(likelihood_ratio_test(base_model, discrete_model))
-
-print("Continous Time vs. Continious and Discrete time model:")
-print(likelihood_ratio_test(continous_model, complex_model))
-
-print("Discrete Time vs. Continious and Discrete time model:")
-print(likelihood_ratio_test(discrete_model, complex_model))
+## Perform likelihood ratio tests
+#print("Base vs. Continuous time model:")
+#print(likelihood_ratio_test(base_model, continous_model))
+#
+#print("Base vs. Discrete time model:")
+#print(likelihood_ratio_test(base_model, discrete_model))
+#
+#print("Continous Time vs. Continious and Discrete time model:")
+#print(likelihood_ratio_test(continous_model, complex_model))
+#
+#print("Discrete Time vs. Continious and Discrete time model:")
+#print(likelihood_ratio_test(discrete_model, complex_model))
