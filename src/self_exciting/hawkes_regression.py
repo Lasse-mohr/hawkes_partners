@@ -34,7 +34,8 @@ class SelfExcitingLogisticRegression:
     Logistic regression with self-exciting kernels for continuous and discrete time. 
     """
     def __init__(self, max_iter=100, tol=1e-6, rng=default_rng(1),
-                 time_types=['continuous', 'discrete'], n_jobs=1):
+                 time_types=['continuous', 'discrete'], n_jobs=1,
+                 ignore_errors=True):
         self.time_types = time_types
         self.rng = rng
         self.max_iter = max_iter
@@ -44,6 +45,7 @@ class SelfExcitingLogisticRegression:
         self.nll_ = None  # Negative log-likelihood after fit
         self.n_params_ = None  # Number of parameters in the model
         self.n_jobs = min(cpu_count(), n_jobs)
+        self.ignore_errors = ignore_errors
 
     def compute_kernels(self, events_all, times_all, delta_s, delta_c):
         """
@@ -152,7 +154,7 @@ class SelfExcitingLogisticRegression:
         """ 
         Helper function to Load the parameters from the optimization result avoiding indexing errors.
         """
-        if self.params_ is None:
+        if self.params_ is None and not self.ignore_errors:
             raise ValueError("The model is not fitted yet.")
 
         alpha = self.params_[0]
@@ -279,8 +281,11 @@ class SelfExcitingLogisticRegression:
         self.success_ = result.success
         self.nll_ = result.fun  # Store the negative log-likelihood
 
-        if not self.success_:
+        if not self.success_ and not self.ignore_errors:
             raise ValueError("Optimization did not converge.")
+        elif not self.success_:
+            print("Warning: Optimization did not converge.")
+
         return self
 
     def predict_proba(self, times_all, covariates_all):
