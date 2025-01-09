@@ -213,7 +213,6 @@ def compute_gradients(params:np.ndarray, events_all, times_all, covariates_all, 
 
     # Combine all gradients into a single vector
     grad = np.concatenate(([g_alpha], g_gamma, [g_beta_c, g_delta_c, g_beta_s, g_delta_s]))
-    print(grad)
 
     return grad
 
@@ -526,7 +525,7 @@ class SelfExcitingLogisticRegression:
                 current_covariate = covariates[past_event_indices][-1] # only the current features are needed
 
                 # Compute kernels
-                s_val, c_val = self.compute_kernels_single_timepoint( time_point=time_point, past_events=past_events,
+                s_val, c_val = self.compute_kernels_single_timepoint(time_point=time_point, past_events=past_events,
                                                             past_times=past_times, delta_s=delta_s, delta_c=delta_c,
                 )
 
