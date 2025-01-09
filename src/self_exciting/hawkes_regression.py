@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 from scipy.optimize import minimize
 from scipy.special import expit  # Logistic sigmoid function
@@ -85,7 +86,7 @@ def estimate_initial_params(events_all, covariates_all, method='logistic'):
 def compute_partial_derivatives_delta(events_all, times_all, delta_s, delta_c, positive_obs_in_groups_idx):
     """
     Compute partial derivatives of the kernel functions with respect to delta_s and delta_c.
-    This function mirrors the structure of compute_kernels, but computes the partials instead.
+    This function mirrors the structure of compute_kernels_sparse, but computes the partials instead.
 
     Args:
         events_all: Binary events array (1D).
@@ -135,7 +136,7 @@ def compute_partial_derivatives_delta(events_all, times_all, delta_s, delta_c, p
 
 
 def compute_gradients(params:np.ndarray, events_all, times_all, covariates_all, positive_obs_in_groups_idx,
-                      time_types, compute_kernels):
+                      time_types, kernel_fun):
     """
     Compute the gradient of the log-likelihood with respect to the model parameters.
 
@@ -148,7 +149,7 @@ def compute_gradients(params:np.ndarray, events_all, times_all, covariates_all, 
         individuals_all: Array of individual identifiers (1D).
         positive_obs_in_groups_idx: List of index arrays for individuals with multiple positive events.
         time_types: List specifying which types ('continuous', 'discrete') are included.
-        compute_kernels: Function that computes s and c arrays.
+        kernel_fun: Function that computes s and c arrays.
 
     Returns:
         grad: 1D array containing the gradient w.r.t. [alpha, gamma..., beta_c, delta_c, beta_s, delta_s].
@@ -162,7 +163,7 @@ def compute_gradients(params:np.ndarray, events_all, times_all, covariates_all, 
     delta_s = params[-1]
 
     # Compute kernels
-    s, c = compute_kernels(events_all=events_all, times_all=times_all, delta_s=delta_s,
+    s, c = kernel_fun(events_all=events_all, times_all=times_all, delta_s=delta_s,
                            delta_c=delta_c, positive_obs_in_groups_idx=positive_obs_in_groups_idx
                            )
     p = compute_linear_probs(alpha=alpha, gamma=gamma, beta_s=beta_s, beta_c=beta_c, s=s,
@@ -250,7 +251,43 @@ class SelfExcitingLogisticRegression:
             else:
                 self.shapes_checked = True
 
-    def compute_kernels(self, events_all, times_all, delta_s, delta_c, positive_obs_in_groups_idx):
+
+    def compute_kernels_single_timepoint(self, time_point, past_events, past_times, delta_s, delta_c):
+        """
+        Compute the kernels s_ij and c_ij for a single time point for a single individual.
+
+        Args:
+            time_point: Time point to compute kernels for.
+            past_events: Events prior to the time point.
+            past_times: 2D array with continuous time (row 0) and discrete time (row 1) of past events.
+            delta_s: Decay parameter for discrete time.
+            delta_c: Decay parameter for continuous time.
+        """
+
+        # check if we have any past events
+        if len(past_events) == 0:
+            return 0, 0
+        
+        past_pos_events = past_events > 0
+
+        # Split continuous and discrete time
+        past_continuous_times = past_times[0, :]
+        past_discrete_times = past_times[1, :]
+
+        # Continuous kernel: c_ij
+        time_diff = time_point - past_continuous_times
+        filtered_time_diff = time_diff[past_pos_events]
+        c = np.sum(np.exp(-delta_c * filtered_time_diff))
+
+        # Discrete kernel: s_ij
+        discrete_diff = max(past_discrete_times) - past_discrete_times
+        filtered_discrete_diff = discrete_diff[past_pos_events]
+        s = np.sum(np.exp(-delta_s * filtered_discrete_diff))
+
+        return s, c
+
+
+    def compute_kernels_sparse(self, events_all, times_all, delta_s, delta_c, positive_obs_in_groups_idx):
         """
         Computes the discrete and continuous kernels s_ij and c_ij for all individuals.
         
@@ -359,9 +396,9 @@ class SelfExcitingLogisticRegression:
         delta_s = params[-1]
 
         # Compute kernels
-        s, c = self.compute_kernels(events_all=events_all, times_all=times_all,
+        s, c = self.compute_kernels_sparse(events_all=events_all, times_all=times_all,
                                     delta_s=delta_s, delta_c=delta_c,
-                                    positive_obs_in_groups_idx=positive_obs_in_groups_idx
+                                    positive_obs_in_groups_idx=positive_obs_in_groups_idx,
         )
         probs = compute_linear_probs(alpha=alpha, gamma=gamma, beta_s=beta_s, beta_c=beta_c,
                                     s=s, c=c, covariates_all=covariates_all,
@@ -398,9 +435,9 @@ class SelfExcitingLogisticRegression:
             alpha_bound = [(None, None)]
             gamma_bound = [(None, None) for _ in range(n_covariates)]
             beta_s_bound = [(None, None)]
-            delta_s_bound = [(1e-10, None)]
+            delta_s_bound = [(1e-4, None)]
             beta_c_bound = [(None, None)]
-            delta_c_bound = [(1e-10, None)]
+            delta_c_bound = [(1e-4, None)]
 
             bounds = alpha_bound + gamma_bound + beta_s_bound + delta_s_bound + beta_c_bound + delta_c_bound
 
@@ -450,10 +487,21 @@ class SelfExcitingLogisticRegression:
             )
 
 
-    def predict_proba(self, times, covariates, prior_event_sequence, individuals_all, events_all):
+    def predict_probas(self, time_points, event_times, covariates, events, return_kernels=False):
         """
-        Predict probabilities for new data.
+        Predict probabilities for binary outcomes at given time points for a single individual.
+
+        Args:
+            time_points: Array of continuous time points to predict at.
+            event_times: 2D array with continuous time (row 0) and discrete time (row 1) of the observed events.
+                        Difference between time_points and event_times is that event_times are the (discrete and cont)
+                        time points from observations, while time_points are the time points we want to predict at.
+            covariates: Covariates matrix (N x M) for N events and M covariates.
+            events: Binary event outcomes for all observations of the individual (1D).
+            return_kernels: If True, the kernel values are also returned.
+
         """
+
         if self.n_params_ is None:
             raise ValueError("The model is not fitted yet.")
 
@@ -462,25 +510,38 @@ class SelfExcitingLogisticRegression:
         if alpha is None or gamma is None or beta_s is None or beta_c is None or delta_s is None or delta_c is None:
             raise ValueError("One or more model parameters None. Model have been fitted, but not successfully.")
 
-        # Compute kernels
-        s, c = self.compute_kernels(
-            events_all = prior_event_sequence,
-            times_all=times,
-            delta_s=delta_s,
-            delta_c=delta_c,
-            positive_obs_in_groups_idx=compute_time_series_groups_idx(individuals_all, events_all)
-        )
+        probas = np.zeros(len(time_points))
+        c = np.zeros(len(time_points))
+        s = np.zeros(len(time_points))
 
-        return compute_linear_probs(
-            alpha=alpha,
-            gamma=gamma,
-            beta_s=beta_s,
-            beta_c=beta_c,
-            s=s,
-            c=c,
-            covariates_all=covariates,
-            time_types=self.time_types
-        )
+        for idx, time_point in enumerate(time_points):
+            # If the time point is before the first event, return the baseline probability
+            past_event_indices = event_times[0,:]< time_point # obs continuous time prior to time_point
+            if not np.any(past_event_indices):
+                probas[idx] = expit(alpha + np.dot(covariates[0], gamma))
+
+            else:
+                past_times = event_times[:, past_event_indices]
+                past_events = events[past_event_indices]
+                current_covariate = covariates[past_event_indices][-1] # only the current features are needed
+
+                # Compute kernels
+                s_val, c_val = self.compute_kernels_single_timepoint( time_point=time_point, past_events=past_events,
+                                                            past_times=past_times, delta_s=delta_s, delta_c=delta_c,
+                )
+
+                proba = compute_linear_probs( alpha=alpha, gamma=gamma, beta_s=beta_s, beta_c=beta_c,
+                    s=s_val, c=c_val, covariates_all=current_covariate, time_types=self.time_types
+                )
+
+                probas[idx] = proba
+                c[idx] = c_val
+                s[idx] = s_val
+
+        if return_kernels:
+            return probas, c, s
+        else:
+            return probas
 
     def predict(self, times, covariates, prior_event_sequence, threshold=0.5):
         """
@@ -511,6 +572,28 @@ class SelfExcitingLogisticRegression:
         if self.nll_ is None or self.n_params_ is None:
             raise ValueError("Model must be fitted before computing BIC.")
         return np.log(n_samples) * self.n_params_ + 2 * self.nll_
+    
+    def save_model(self, filename):
+        """
+        Save the model to a file.
+        """
+        with open(filename, 'wb') as f:
+            pickle.dump(self, f)
+    
+    def load_model(self, filename):
+        """
+        Load the model from a file.
+        """
+        with open(filename, 'rb') as f:
+            model = pickle.load(f)
+        
+        self.__dict__.update(model.__dict__)
+
+
+
+    def __str__(self):
+        return f"SelfExcitingLogisticRegression(time_types={self.time_types})"
+
 
 
 ############ Method with gradients #####################
@@ -562,7 +645,7 @@ class SelfExcitingLogisticRegressionWithGrad(SelfExcitingLogisticRegression):
                     covariates_all=covariates_all,
                     positive_obs_in_groups_idx=positive_obs_in_groups_idx,
                     time_types=self.time_types,
-                    compute_kernels=self.compute_kernels
+                    compute_kernels=self.compute_kernels_sparse
                 )
 
             # Use scipy.optimize.minimize with gradients
